@@ -1,28 +1,46 @@
 [
-    {
-        "query": "lbHeap_80015900",
-        "project": "melee",
-        "expect": ["MakeColorGenTExp"],
-        "note": "2x-partial-unroll construct twin, found manually 2026-07-07"
-    },
-    {
-        "query": "mpRightWallGetTop",
-        "project": "melee",
-        "expect": ["mpLeftWallGetBottom", "mpRightWallGetBottom", "mpLeftWallGetTop",
-                   "mpFloorGetRight", "mpFloorGetLeft", "mpCeilingGetRight",
-                   "mpCeilingGetLeft"],
-        "note": "the 8-getter family, near-identical bodies"
-    },
-    {
-        "query": "un_8031FD18_OnEnter",
-        "project": "melee",
-        "expect": ["un_80320A40_OnEnter"],
-        "note": "vi1201 sibling screens, same residual class"
-    },
-    {
-        "query": "mpLineNextNonFloor",
-        "project": "melee",
-        "expect": ["mpLineNextNonRightWall", "mpLinePrevNonFloor"],
-        "note": "mpLineNonFamily, matched 2026-07-13 by mirroring the in-file twin"
-    }
+  {
+    "query": "lbHeap_80015900",
+    "project": "melee",
+    "expect": [
+      "MakeColorGenTExp"
+    ],
+    "note": "2x-partial-unroll construct twin, found manually 2026-07-07"
+  },
+  {
+    "query": "mpRightWallGetTop",
+    "project": "melee",
+    "expect": [
+      "mpLeftWallGetBottom",
+      "mpRightWallGetBottom",
+      "mpLeftWallGetTop",
+      "mpFloorGetRight",
+      "mpFloorGetLeft",
+      "mpCeilingGetRight",
+      "mpCeilingGetLeft"
+    ],
+    "note": "the 8-getter family, near-identical bodies"
+  },
+  {
+    "query": "un_8031FD18_OnEnter",
+    "project": "melee",
+    "expect": [
+      "un_80320A40_OnEnter"
+    ],
+    "note": "vi1201 sibling screens, same residual class"
+  },
+  {
+    "query": "mpLineNextNonFloor",
+    "project": "melee",
+    "expect": [
+      "mpLineNextNonRightWall",
+      "mpLinePrevNonFloor"
+    ],
+    "note": "mpLineNonFamily, matched 2026-07-13 by mirroring the in-file twin"
+  },
+  {
+    "query": "fn_802523D8",
+    "expected": "fn_802514D8",
+    "note": "mninfo/mncount wrapper+inline text-free twins; donor source transplanted verbatim -> 100% match (session 2026-07-14)"
+  }
 ]
