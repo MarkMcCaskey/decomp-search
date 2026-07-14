@@ -22,6 +22,10 @@ LOCAL_DIM = 512  # MRL truncation; voyage-4 supports 2048/1024/512/256
 LOCAL_MODEL = "voyageai/voyage-4-nano"
 
 Progress = Callable[[int, int], None]
+# on_batch(indices, vectors): called as each internal batch finishes, so
+# callers can persist results incrementally instead of waiting for the
+# full corpus
+OnBatch = Callable[[list[int], list[list[float]]], None]
 
 
 def _noop(done: int, total: int) -> None:
@@ -36,9 +40,11 @@ def _hash_idx(feature: str, dim: int) -> tuple[int, float]:
 
 
 def embed_hashed(token_docs: list[str], progress: Progress = _noop,
-                 dim: int = HASHED_DIM) -> list[list[float]]:
+                 dim: int = HASHED_DIM,
+                 on_batch: OnBatch | None = None) -> list[list[float]]:
     """Feature-hash 1/2/3-grams of instruction tokens, sublinear TF, L2 norm."""
     out = []
+    flushed = 0
     for i, doc in enumerate(token_docs):
         lines = doc.splitlines()
         toks = lines[-1].split() if lines else []
@@ -53,8 +59,13 @@ def embed_hashed(token_docs: list[str], progress: Progress = _noop,
             vec[idx] += sign * (1.0 + math.log(c))
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         out.append([v / norm for v in vec])
-        if i % 500 == 0:
-            progress(i, len(token_docs))
+        if len(out) - flushed >= 512:
+            if on_batch:
+                on_batch(list(range(flushed, len(out))), out[flushed:])
+            flushed = len(out)
+            progress(i + 1, len(token_docs))
+    if on_batch and flushed < len(out):
+        on_batch(list(range(flushed, len(out))), out[flushed:])
     progress(len(token_docs), len(token_docs))
     return out
 
@@ -68,25 +79,24 @@ MAX_BATCH_DOCS = 256
 
 
 def embed_local(token_docs: list[str], progress: Progress = _noop,
-                batch_size: int = MAX_BATCH_DOCS) -> list[list[float]]:
+                batch_size: int = MAX_BATCH_DOCS,
+                on_batch: OnBatch | None = None) -> list[list[float]]:
     """voyage-4-nano, self-hosted via sentence-transformers (MPS/CUDA/CPU).
 
     Throughput: docs are packed longest-first into token-budget batches —
     a batch takes as many docs as fit in MAX_BATCH_TOKENS padded tokens,
     so short docs (the majority) share large batches instead of a fixed
-    small one sized for the 2048-token worst case. Sequences cap at 2048
-    tokens to bound attention memory.
+    small one sized for the 2048-token worst case. Batches execute
+    shortest-first so progress is visible immediately and most docs
+    checkpoint early. Sequences cap at 2048 tokens to bound attention
+    memory.
     """
     global _local_model
-    import torch
     from sentence_transformers import SentenceTransformer  # lazy
 
     if _local_model is None:
-        kw = {}
-        if torch.backends.mps.is_available():
-            kw["model_kwargs"] = {"dtype": torch.bfloat16}
         _local_model = SentenceTransformer(
-            LOCAL_MODEL, trust_remote_code=True, truncate_dim=LOCAL_DIM, **kw)
+            LOCAL_MODEL, trust_remote_code=True, truncate_dim=LOCAL_DIM)
         _local_model.max_seq_length = 2048
 
     docs = [d[:8000] for d in token_docs]
@@ -107,6 +117,7 @@ def embed_local(token_docs: list[str], progress: Progress = _noop,
         cur_max = max(cur_max, lens[i])
     if cur:
         batches.append(cur)
+    batches.reverse()  # shortest docs (fattest batches) first
 
     out: list[list[float]] = [[] for _ in docs]
     done = 0
@@ -114,16 +125,19 @@ def embed_local(token_docs: list[str], progress: Progress = _noop,
         emb = _local_model.encode_document(
             [docs[i] for i in b], batch_size=len(b),
             normalize_embeddings=True, show_progress_bar=False)
-        for i, e in zip(b, emb):
-            out[i] = e.tolist()
+        vecs = [e.tolist() for e in emb]
+        for i, v in zip(b, vecs):
+            out[i] = v
+        if on_batch:
+            on_batch(b, vecs)
         done += len(b)
         progress(done, len(docs))
     return out
 
 
 def embed_voyage(token_docs: list[str], progress: Progress = _noop,
-                 model: str = "voyage-4-nano",
-                 batch_size: int = 128) -> list[list[float]]:
+                 model: str = "voyage-4-nano", batch_size: int = 128,
+                 on_batch: OnBatch | None = None) -> list[list[float]]:
     import voyageai  # lazy: only needed for this backend
 
     client = voyageai.Client(api_key=os.environ["VOYAGE_API_KEY"])
@@ -132,6 +146,8 @@ def embed_voyage(token_docs: list[str], progress: Progress = _noop,
         batch = [d[:16000] for d in token_docs[i : i + batch_size]]
         res = client.embed(batch, model=model, input_type="document",
                            output_dimension=LOCAL_DIM)
+        if on_batch:
+            on_batch(list(range(i, i + len(batch))), list(res.embeddings))
         vecs.extend(res.embeddings)
         progress(min(i + batch_size, len(token_docs)), len(token_docs))
     return vecs
@@ -151,10 +167,11 @@ def dim_for(backend: str) -> int:
 
 
 def embed(token_docs: list[str], backend: str = "hashed",
-          progress: Progress = _noop) -> list[list[float]]:
+          progress: Progress = _noop,
+          on_batch: OnBatch | None = None) -> list[list[float]]:
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; have {sorted(BACKENDS)}")
-    return BACKENDS[backend](token_docs, progress)
+    return BACKENDS[backend](token_docs, progress, on_batch=on_batch)
 
 
 def default_backend() -> str:

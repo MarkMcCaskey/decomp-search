@@ -114,20 +114,23 @@ def cmd_ingest_dtk(args) -> None:
 
         if plan.delete_ids:
             dbmod.delete_ids(table, plan.delete_ids)
-        for chunk in _chunks(plan.rewrite, args.chunk):
+        for chunk in _chunks(plan.rewrite, 512):
             table.add(chunk)
 
-        # longest-first: chunks stay length-homogeneous for batch packing,
-        # and the memory-heaviest work runs first (fail fast, not at hour 1)
-        plan.embed.sort(key=lambda r: len(r["tokens"]), reverse=True)
         upd = rep.task(f"embed+write ({backend})", len(plan.embed))
-        done = 0
-        for chunk in _chunks(plan.embed, args.chunk):
-            vecs = embed([r["tokens"] for r in chunk], backend,
-                         progress=lambda d, t: upd(done + d))
-            table.add([{**r, "vector": v} for r, v in zip(chunk, vecs)])
-            done += len(chunk)
-            upd(done)
+
+        def write_batch(idx: list[int], vecs: list[list[float]]) -> None:
+            table.add([{**plan.embed[i], "vector": v}
+                       for i, v in zip(idx, vecs)])
+
+        if plan.embed:
+            embed([r["tokens"] for r in plan.embed], backend,
+                  progress=lambda done, total: upd(done),
+                  on_batch=write_batch)
+            try:
+                table.optimize()  # compact the many per-batch fragments
+            except Exception:
+                pass
 
     console.print(f"[green]{args.project}: {plan.unchanged} kept, "
                   f"{len(plan.rewrite)} refreshed, {len(plan.embed)} embedded, "
@@ -243,8 +246,6 @@ def main() -> None:
     pi.add_argument("--min-insns", type=int, default=8)
     pi.add_argument("--full", action="store_true",
                     help="re-embed everything, ignoring stored vectors")
-    pi.add_argument("--chunk", type=int, default=1024,
-                    help="functions per embed+write chunk (DB write/resume unit)")
     pi.set_defaults(func=cmd_ingest_dtk)
 
     pf = sub.add_parser("find")

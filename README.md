@@ -46,8 +46,8 @@ optionally a decomp.dev progress report for match percentages:
 Ingest is **incremental**: each function's token text is diffed against the
 stored row, so re-running only re-embeds new/changed functions (metadata-only
 changes like a moved match % reuse the stored vector), and deletes stale
-rows. Embedding writes to LanceDB in chunks (`--chunk`, default 256), so an
-interrupted ingest keeps its progress — rerun and it resumes. `--full`
+rows. Every embedding batch writes to LanceDB as it finishes, so an
+interrupted ingest loses at most one batch — rerun and it resumes. `--full`
 forces a re-embed of everything. Multiple games coexist in one index
 (`--project kirby ...` etc.). Progress renders as rich bars on a TTY and as
 plain flushed lines when redirected to a log.
