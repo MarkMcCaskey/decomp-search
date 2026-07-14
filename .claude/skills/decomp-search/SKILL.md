@@ -42,6 +42,16 @@ only so far. For exact instruction-pattern hunts, targeted scans
 (`melee/build/twinscan_*.py`: objdump all target .o's, regex, rank by
 match%) remain the sharpest tool — findw for recall, twinscan for proof.
 
+## Donor transplant (the highest-yield workflow)
+
+When `find` returns a matched function at sim >0.98 with the same shape,
+objdump BOTH and compare: if the instruction streams are identical modulo
+displacements/trip counts, transplant the donor's SOURCE STRUCTURE wholesale
+(wrapper+inline split, accessor macros, alias pairs, decl order, PAD values)
+instead of tuning the current code. Validated: fn_802523D8 (mninfo) hit 100%
+in one step from the mncount donor fn_802514D8 (sim 0.991) after residual
+tuning had plateaued at 97.6%.
+
 ## Picking solve targets
 
 `solvability_sweep.py` ranks every sub-95% function by its best matched
