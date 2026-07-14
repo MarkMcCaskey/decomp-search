@@ -7,11 +7,19 @@ function, show me the most similar **matched** functions so I can steal
 their source recipe."
 
 Storage/search is [LanceDB](https://lancedb.github.io/lancedb/) (local, no
-server). Embeddings are pluggable:
+server). Embeddings are pluggable (each backend gets its own table, so they
+coexist for A/B comparison; select with the global `--backend` flag):
 
 - `hashed` (default): deterministic feature-hashed n-grams over a normalized
-  instruction-token stream. No API, fully reproducible.
+  instruction-token stream. No API, no model download, fully reproducible.
+- `local`: [voyage-4-nano](https://huggingface.co/voyageai/voyage-4-nano)
+  self-hosted via sentence-transformers (open weights, Apache 2.0; ~340M
+  params, runs on MPS/CUDA/CPU; first run downloads the model). Shares an
+  embedding space with the larger Voyage 4 API models, so a locally built
+  index can later be queried with `voyage-4-large` API embeddings without
+  re-indexing.
 - `voyage`: voyage-4-nano via the Voyage API (`VOYAGE_API_KEY` env var).
+  Same embedding space as `local`.
 
 Normalization keeps the structural signal (mnemonic skeleton, operand
 shapes, **branch direction** — `b(back)` is a backedge) and discards what

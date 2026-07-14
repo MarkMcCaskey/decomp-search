@@ -1,9 +1,10 @@
-"""decomp-twins CLI.
+"""decomp-search CLI.
 
   ingest-dtk  ROOT --project NAME [--version GALE01] [--report PATH|URL]
-  find        FN [--project P] [--min-match 99] [-k 15] [--all]
-  stats
-  eval        [--pairs eval/known_pairs.json]
+              [--backend hashed|local|voyage]
+  find        FN [--project P] [--min-match 99.5] [-k 15] [--all] [--backend B]
+  stats       [--backend B]
+  eval        [--pairs eval/known_pairs.json] [--backend B]
 """
 
 from __future__ import annotations
@@ -62,16 +63,16 @@ def cmd_ingest_dtk(args) -> None:
                 })
             prog.advance(t)
 
-        t2 = prog.add_task(f"embedding ({backend})", total=1)
-        vectors = embed(docs, backend)
-        prog.advance(t2)
+        t2 = prog.add_task(f"embedding ({backend})", total=len(docs))
+        vectors = embed(docs, backend,
+                        progress=lambda done, total: prog.update(t2, completed=done))
 
     for r, v in zip(records, vectors):
         r["vector"] = v
 
     dim = len(vectors[0]) if vectors else HASHED_DIM
     conn = dbmod.connect(args.db)
-    table = dbmod.open_or_create(conn, dim)
+    table = dbmod.open_or_create(conn, dim, backend)
     dbmod.replace_project(table, args.project)
     table.add(records)
     console.print(f"[green]ingested {len(records)} functions "
@@ -121,9 +122,18 @@ def _print_hits(query_name: str, hits: list[dict]) -> None:
     console.print(tbl)
 
 
-def cmd_find(args) -> None:
+def _open(args):
     conn = dbmod.connect(args.db)
-    table = conn.open_table(dbmod.TABLE)
+    name = dbmod.table_name(args.backend)
+    if name not in conn.table_names():
+        console.print(f"[red]no index for backend {args.backend!r} — "
+                      f"run ingest-dtk with --backend {args.backend}[/red]")
+        sys.exit(1)
+    return conn.open_table(name)
+
+
+def cmd_find(args) -> None:
+    table = _open(args)
     row = _lookup(table, args.function, args.project)
     if row is None:
         console.print(f"[red]function {args.function!r} not found[/red]")
@@ -135,15 +145,13 @@ def cmd_find(args) -> None:
 
 
 def cmd_stats(args) -> None:
-    conn = dbmod.connect(args.db)
-    table = conn.open_table(dbmod.TABLE)
+    table = _open(args)
     n = table.count_rows()
-    console.print(f"{n} functions indexed")
+    console.print(f"{n} functions indexed (backend={args.backend})")
 
 
 def cmd_eval(args) -> None:
-    conn = dbmod.connect(args.db)
-    table = conn.open_table(dbmod.TABLE)
+    table = _open(args)
     pairs = json.load(open(args.pairs))
     ok = 0
     for case in pairs:
@@ -168,6 +176,8 @@ def cmd_eval(args) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="dsearch")
     p.add_argument("--db", default=str(dbmod.DEFAULT_DB))
+    p.add_argument("--backend", choices=["hashed", "local", "voyage"],
+                   default=default_backend())
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pi = sub.add_parser("ingest-dtk")
@@ -175,7 +185,6 @@ def main() -> None:
     pi.add_argument("--project", required=True)
     pi.add_argument("--version", default="GALE01")
     pi.add_argument("--report", help="decomp.dev report JSON path or URL")
-    pi.add_argument("--backend", choices=["hashed", "voyage"])
     pi.add_argument("--min-insns", type=int, default=8)
     pi.set_defaults(func=cmd_ingest_dtk)
 

@@ -8,7 +8,10 @@ import lancedb
 import pyarrow as pa
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "index.lancedb"
-TABLE = "functions"
+
+
+def table_name(backend: str) -> str:
+    return f"functions_{backend}"
 
 
 def connect(db_path: str | Path = DEFAULT_DB):
@@ -31,10 +34,11 @@ def schema(dim: int) -> pa.Schema:
     ])
 
 
-def open_or_create(db, dim: int):
-    if TABLE in db.table_names():
-        return db.open_table(TABLE)
-    return db.create_table(TABLE, schema=schema(dim))
+def open_or_create(db, dim: int, backend: str):
+    name = table_name(backend)
+    if name in db.table_names():
+        return db.open_table(name)
+    return db.create_table(name, schema=schema(dim))
 
 
 def replace_project(table, project: str) -> None:
