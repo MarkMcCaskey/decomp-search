@@ -10,13 +10,19 @@ import pyarrow as pa
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "index.lancedb"
 
 
-def table_name(backend: str) -> str:
-    return f"functions_{backend}"
+def table_name(backend: str, kind: str = "functions") -> str:
+    return f"{kind}_{backend}"
 
 
 def connect(db_path: str | Path = DEFAULT_DB):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     return lancedb.connect(str(db_path))
+
+
+def has_table(db, name: str) -> bool:
+    names = db.list_tables() if hasattr(db, "list_tables") \
+        else db.table_names()
+    return name in set(names)
 
 
 def schema(dim: int) -> pa.Schema:
@@ -34,9 +40,9 @@ def schema(dim: int) -> pa.Schema:
     ])
 
 
-def open_or_create(db, dim: int, backend: str):
-    name = table_name(backend)
-    if name in db.table_names():
+def open_or_create(db, dim: int, backend: str, kind: str = "functions"):
+    name = table_name(backend, kind)
+    if has_table(db, name):
         return db.open_table(name)
     return db.create_table(name, schema=schema(dim))
 

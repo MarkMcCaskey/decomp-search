@@ -24,7 +24,7 @@ from . import db as dbmod
 from .embed import default_backend, dim_for, embed
 from .ingest_dtk import (find_objdump, find_source_file, iter_units,
                          load_report, parse_object)
-from .normalize import token_text
+from .normalize import token_text, window_texts
 from .sync import plan_sync
 
 console = Console()
@@ -74,6 +74,37 @@ def _chunks(seq: list, n: int):
         yield seq[i : i + n]
 
 
+def _sync_table(table, desired: list[dict], full: bool, rep: Reporter,
+                label: str, backend: str) -> None:
+    existing = dbmod.fetch_project(table, desired[0]["project"]) \
+        if desired else []
+    plan = plan_sync(existing, desired, full=full)
+    print(f"{label} sync plan: {plan.unchanged} unchanged, "
+          f"{len(plan.rewrite)} metadata-only, {len(plan.embed)} to embed, "
+          f"{len(plan.delete_ids)} deletes", flush=True)
+
+    if plan.delete_ids:
+        dbmod.delete_ids(table, plan.delete_ids)
+    for chunk in _chunks(plan.rewrite, 512):
+        table.add(chunk)
+
+    upd = rep.task(f"embed+write {label} ({backend})", len(plan.embed))
+
+    def write_batch(idx: list[int], vecs: list[list[float]]) -> None:
+        table.add([{**plan.embed[i], "vector": v} for i, v in zip(idx, vecs)])
+
+    if plan.embed:
+        embed([r["tokens"] for r in plan.embed], backend,
+              progress=lambda done, total: upd(done), on_batch=write_batch)
+        try:
+            table.optimize()  # compact the many per-batch fragments
+        except Exception:
+            pass
+    console.print(f"[green]{label}: {plan.unchanged} kept, "
+                  f"{len(plan.rewrite)} refreshed, {len(plan.embed)} embedded, "
+                  f"{len(plan.delete_ids)} deleted[/green]")
+
+
 def cmd_ingest_dtk(args) -> None:
     root = Path(args.root).resolve()
     objdump = find_objdump(root)
@@ -85,6 +116,7 @@ def cmd_ingest_dtk(args) -> None:
 
     units = list(iter_units(root, args.version))
     desired: list[dict] = []
+    desired_w: list[dict] = []
     with Reporter() as rep:
         upd = rep.task(f"disassembling {args.project}", len(units))
         for i, (obj, unit) in enumerate(units):
@@ -93,48 +125,33 @@ def cmd_ingest_dtk(args) -> None:
                 if fn.size < args.min_insns:
                     continue
                 pct, _ = report.get(fn.name, (-1.0, None))
-                desired.append({
-                    "id": f"{args.project}:{unit}:{fn.name}",
+                meta = {
                     "name": fn.name,
                     "project": args.project,
                     "unit": unit,
                     "src_path": src,
-                    "n_insns": fn.size,
                     "match_pct": pct,
                     "backend": backend,
-                    "tokens": token_text(fn),
-                })
+                }
+                desired.append({**meta,
+                                "id": f"{args.project}:{unit}:{fn.name}",
+                                "n_insns": fn.size,
+                                "tokens": token_text(fn)})
+                if args.windows:
+                    for start, doc in window_texts(fn):
+                        desired_w.append({
+                            **meta,
+                            "id": f"{args.project}:{unit}:{fn.name}:w{start}",
+                            "n_insns": len(doc.splitlines()[-1].split()),
+                            "tokens": doc,
+                        })
             upd(i + 1)
 
-        existing = dbmod.fetch_project(table, args.project)
-        plan = plan_sync(existing, desired, full=args.full)
-        print(f"sync plan: {plan.unchanged} unchanged, "
-              f"{len(plan.rewrite)} metadata-only, {len(plan.embed)} to embed, "
-              f"{len(plan.delete_ids)} deletes", flush=True)
-
-        if plan.delete_ids:
-            dbmod.delete_ids(table, plan.delete_ids)
-        for chunk in _chunks(plan.rewrite, 512):
-            table.add(chunk)
-
-        upd = rep.task(f"embed+write ({backend})", len(plan.embed))
-
-        def write_batch(idx: list[int], vecs: list[list[float]]) -> None:
-            table.add([{**plan.embed[i], "vector": v}
-                       for i, v in zip(idx, vecs)])
-
-        if plan.embed:
-            embed([r["tokens"] for r in plan.embed], backend,
-                  progress=lambda done, total: upd(done),
-                  on_batch=write_batch)
-            try:
-                table.optimize()  # compact the many per-batch fragments
-            except Exception:
-                pass
-
-    console.print(f"[green]{args.project}: {plan.unchanged} kept, "
-                  f"{len(plan.rewrite)} refreshed, {len(plan.embed)} embedded, "
-                  f"{len(plan.delete_ids)} deleted (backend={backend})[/green]")
+        _sync_table(table, desired, args.full, rep, "functions", backend)
+        if args.windows:
+            wtable = dbmod.open_or_create(conn, dim_for(backend), backend,
+                                          kind="windows")
+            _sync_table(wtable, desired_w, args.full, rep, "windows", backend)
 
 
 def _lookup(table, name: str, project: str | None):
@@ -183,7 +200,7 @@ def _print_hits(query_name: str, hits: list[dict]) -> None:
 def _open(args):
     conn = dbmod.connect(args.db)
     name = dbmod.table_name(args.backend)
-    if name not in conn.table_names():
+    if not dbmod.has_table(conn, name):
         console.print(f"[red]no index for backend {args.backend!r} — "
                       f"run ingest-dtk with --backend {args.backend}[/red]")
         sys.exit(1)
@@ -200,6 +217,64 @@ def cmd_find(args) -> None:
     hits = _find(table, row, args.k, min_match, args.exclude_self_unit)
     _print_hits(f"{args.function} ({row['n_insns']} insns, "
                 f"match {row['match_pct']:.2f})", hits)
+
+
+def _wstart(row_id: str) -> int:
+    return int(row_id.rsplit(":w", 1)[1])
+
+
+def cmd_findw(args) -> None:
+    conn = dbmod.connect(args.db)
+    name = dbmod.table_name(args.backend, "windows")
+    if not dbmod.has_table(conn, name):
+        console.print(f"[red]no window index for backend {args.backend!r} — "
+                      f"run ingest-dtk with --windows[/red]")
+        sys.exit(1)
+    wt = conn.open_table(name)
+    where = f"name = '{args.function}'"
+    if args.project:
+        where += f" AND project = '{args.project}'"
+    qrows = wt.search().where(where, prefilter=True).limit(1000).to_list()
+    if not qrows:
+        console.print(f"[red]no windows for {args.function!r} — was its "
+                      f"project ingested with --windows?[/red]")
+        sys.exit(1)
+
+    min_match = None if args.all else args.min_match
+    best: dict[tuple, dict] = {}
+    for q in qrows:
+        flt = f"match_pct >= {min_match}" if min_match is not None else None
+        res = (wt.search(q["vector"]).metric("cosine")
+               .where(flt, prefilter=True).limit(80).to_list())
+        for h in res:
+            if h["name"] == q["name"] and h["project"] == q["project"]:
+                continue
+            if args.exclude_self_unit and h["unit"] == q["unit"] \
+                    and h["project"] == q["project"]:
+                continue
+            key = (h["project"], h["unit"], h["name"])
+            sim = 1.0 - h["_distance"]
+            if key not in best or sim > best[key]["sim"]:
+                best[key] = {"sim": sim, "hit": h, "qstart": _wstart(q["id"]),
+                             "hstart": _wstart(h["id"])}
+
+    ranked = sorted(best.values(), key=lambda e: -e["sim"])[: args.k]
+    tbl = Table(title=f"window twins of {args.function} "
+                      f"({len(qrows)} windows searched)")
+    tbl.add_column("sim", justify="right")
+    tbl.add_column("match%", justify="right")
+    tbl.add_column("function")
+    tbl.add_column("q@", justify="right")
+    tbl.add_column("t@", justify="right")
+    tbl.add_column("unit")
+    for e in ranked:
+        h = e["hit"]
+        pct = h["match_pct"]
+        pct_s = f"{pct:.2f}" if pct >= 0 else "?"
+        style = "green" if pct >= 99.5 else ("yellow" if pct >= 0 else "dim")
+        tbl.add_row(f"{e['sim']:.3f}", f"[{style}]{pct_s}[/{style}]",
+                    h["name"], str(e["qstart"]), str(e["hstart"]), h["unit"])
+    console.print(tbl)
 
 
 def cmd_stats(args) -> None:
@@ -246,7 +321,20 @@ def main() -> None:
     pi.add_argument("--min-insns", type=int, default=8)
     pi.add_argument("--full", action="store_true",
                     help="re-embed everything, ignoring stored vectors")
+    pi.add_argument("--windows", action="store_true",
+                    help="also index sliding 32-insn windows (construct-level"
+                         " search via findw)")
     pi.set_defaults(func=cmd_ingest_dtk)
+
+    pw = sub.add_parser("findw", help="construct-level search: match any "
+                                      "window of FN against all windows")
+    pw.add_argument("function")
+    pw.add_argument("--project")
+    pw.add_argument("--min-match", type=float, default=99.5)
+    pw.add_argument("--all", action="store_true")
+    pw.add_argument("-k", type=int, default=15)
+    pw.add_argument("--exclude-self-unit", action="store_true")
+    pw.set_defaults(func=cmd_findw)
 
     pf = sub.add_parser("find")
     pf.add_argument("function")

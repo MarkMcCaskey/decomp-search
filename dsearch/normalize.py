@@ -107,3 +107,22 @@ def token_text(fn: Function) -> str:
     """The document string handed to embedding backends."""
     toks = function_tokens(fn)
     return f"ppc {len(toks)}\n" + " ".join(toks)
+
+
+def window_texts(fn: Function, size: int = 32,
+                 stride: int = 16) -> list[tuple[int, str]]:
+    """Sliding windows over the instruction stream, for construct-level
+    search — a loop shape buried inside a larger function that
+    whole-function vectors can't see. Returns (start_insn, doc) pairs."""
+    toks = function_tokens(fn)
+    if len(toks) <= size:
+        return [(0, f"ppc {len(toks)}\n" + " ".join(toks))] if toks else []
+    out = []
+    last = len(toks) - size
+    for start in range(0, last + 1, stride):
+        w = toks[start : start + size]
+        out.append((start, f"ppc {len(w)}\n" + " ".join(w)))
+    if (last % stride) != 0:  # tail window flush with the function end
+        w = toks[last:]
+        out.append((last, f"ppc {len(w)}\n" + " ".join(w)))
+    return out

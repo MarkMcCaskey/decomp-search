@@ -68,6 +68,19 @@ plain flushed lines when redirected to a log.
 .venv/bin/python -m dsearch.cli find mpRightWallGetTop --exclude-self-unit
 ```
 
+## Construct-level (window) search
+
+`ingest-dtk --windows` also indexes sliding 32-insn windows (stride 16) of
+every function. `findw <fn>` then matches *any part* of the query function
+against *any part* of the corpus — this finds construct twins (a loop shape
+buried inside a larger matched function) that whole-function vectors
+provably miss:
+
+```sh
+.venv/bin/python -m dsearch.cli --backend hashed findw lbHeap_80015900 -k 10
+# -> MakeColorGenTExp t@416: the 2x-unroll construct, invisible to `find`
+```
+
 ## Eval
 
 `eval/known_pairs.json` holds ground-truth twin pairs found manually during
