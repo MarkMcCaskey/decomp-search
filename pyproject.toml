@@ -2,6 +2,8 @@
 name = "dsearch"
 version = "0.1.0"
 description = "Local similarity search over decompilation-project functions (asm + source), for finding matched twins and recipe donors"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-*"]
 requires-python = ">=3.11"
 dependencies = ["lancedb", "rich"]
 
