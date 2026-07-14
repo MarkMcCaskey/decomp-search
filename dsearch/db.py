@@ -20,9 +20,13 @@ def connect(db_path: str | Path = DEFAULT_DB):
 
 
 def has_table(db, name: str) -> bool:
-    names = db.list_tables() if hasattr(db, "list_tables") \
-        else db.table_names()
-    return name in set(names)
+    if hasattr(db, "list_tables"):
+        res = db.list_tables()
+        # newer lancedb returns a ListTablesResponse with .tables
+        names = getattr(res, "tables", res)
+    else:
+        names = db.table_names()
+    return name in list(names)
 
 
 def schema(dim: int) -> pa.Schema:
