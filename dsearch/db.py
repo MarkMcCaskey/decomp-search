@@ -41,5 +41,15 @@ def open_or_create(db, dim: int, backend: str):
     return db.create_table(name, schema=schema(dim))
 
 
-def replace_project(table, project: str) -> None:
-    table.delete(f"project = '{project}'")
+def fetch_project(table, project: str) -> list[dict]:
+    n = table.count_rows(f"project = '{project}'")
+    if n == 0:
+        return []
+    return (table.search().where(f"project = '{project}'", prefilter=True)
+            .limit(n).to_list())
+
+
+def delete_ids(table, ids: list[str], chunk: int = 500) -> None:
+    for i in range(0, len(ids), chunk):
+        quoted = ", ".join(f"'{x}'" for x in ids[i : i + chunk])
+        table.delete(f"id IN ({quoted})")

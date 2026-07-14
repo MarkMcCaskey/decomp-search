@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from rich.console import Console
@@ -20,12 +21,57 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
 from rich.table import Table
 
 from . import db as dbmod
-from .embed import HASHED_DIM, default_backend, embed
+from .embed import default_backend, dim_for, embed
 from .ingest_dtk import (find_objdump, find_source_file, iter_units,
                          load_report, parse_object)
 from .normalize import token_text
+from .sync import plan_sync
 
 console = Console()
+
+
+class Reporter:
+    """Progress UI: rich bars on a TTY, plain flushed lines when redirected
+    (rich Progress renders nothing until exit if stdout is not a terminal)."""
+
+    def __init__(self):
+        self._prog = (Progress(TextColumn("[bold blue]{task.description}"),
+                               BarColumn(), MofNCompleteColumn(),
+                               TimeElapsedColumn(), console=console)
+                      if console.is_terminal else None)
+
+    def __enter__(self):
+        if self._prog:
+            self._prog.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        if self._prog:
+            self._prog.__exit__(*exc)
+
+    def task(self, desc: str, total: int):
+        if self._prog:
+            tid = self._prog.add_task(desc, total=total)
+            return lambda done: self._prog.update(tid, completed=done)
+        start = time.time()
+        state = {"last": 0.0}
+
+        def update(done: int) -> None:
+            now = time.time()
+            if done < total and now - state["last"] < 5.0:
+                return
+            state["last"] = now
+            elapsed = now - start
+            eta = elapsed / done * (total - done) if done else 0.0
+            print(f"{desc}: {done}/{total} elapsed {elapsed:.0f}s "
+                  f"eta {eta:.0f}s", flush=True)
+
+        return update
+
+
+def _chunks(seq: list, n: int):
+    for i in range(0, len(seq), n):
+        yield seq[i : i + n]
 
 
 def cmd_ingest_dtk(args) -> None:
@@ -34,23 +80,20 @@ def cmd_ingest_dtk(args) -> None:
     report = load_report(args.report) if args.report else {}
     backend = args.backend or default_backend()
 
-    units = list(iter_units(root, args.version))
-    records: list[dict] = []
-    docs: list[str] = []
+    conn = dbmod.connect(args.db)
+    table = dbmod.open_or_create(conn, dim_for(backend), backend)
 
-    with Progress(TextColumn("[bold blue]{task.description}"), BarColumn(),
-                  MofNCompleteColumn(), TimeElapsedColumn(),
-                  console=console) as prog:
-        t = prog.add_task(f"disassembling {args.project}", total=len(units))
-        for obj, unit in units:
+    units = list(iter_units(root, args.version))
+    desired: list[dict] = []
+    with Reporter() as rep:
+        upd = rep.task(f"disassembling {args.project}", len(units))
+        for i, (obj, unit) in enumerate(units):
             src = find_source_file(root, unit) or ""
             for fn in parse_object(objdump, obj, unit):
                 if fn.size < args.min_insns:
                     continue
                 pct, _ = report.get(fn.name, (-1.0, None))
-                doc = token_text(fn)
-                docs.append(doc)
-                records.append({
+                desired.append({
                     "id": f"{args.project}:{unit}:{fn.name}",
                     "name": fn.name,
                     "project": args.project,
@@ -59,24 +102,33 @@ def cmd_ingest_dtk(args) -> None:
                     "n_insns": fn.size,
                     "match_pct": pct,
                     "backend": backend,
-                    "tokens": doc,
+                    "tokens": token_text(fn),
                 })
-            prog.advance(t)
+            upd(i + 1)
 
-        t2 = prog.add_task(f"embedding ({backend})", total=len(docs))
-        vectors = embed(docs, backend,
-                        progress=lambda done, total: prog.update(t2, completed=done))
+        existing = dbmod.fetch_project(table, args.project)
+        plan = plan_sync(existing, desired, full=args.full)
+        print(f"sync plan: {plan.unchanged} unchanged, "
+              f"{len(plan.rewrite)} metadata-only, {len(plan.embed)} to embed, "
+              f"{len(plan.delete_ids)} deletes", flush=True)
 
-    for r, v in zip(records, vectors):
-        r["vector"] = v
+        if plan.delete_ids:
+            dbmod.delete_ids(table, plan.delete_ids)
+        for chunk in _chunks(plan.rewrite, args.chunk):
+            table.add(chunk)
 
-    dim = len(vectors[0]) if vectors else HASHED_DIM
-    conn = dbmod.connect(args.db)
-    table = dbmod.open_or_create(conn, dim, backend)
-    dbmod.replace_project(table, args.project)
-    table.add(records)
-    console.print(f"[green]ingested {len(records)} functions "
-                  f"({args.project}, backend={backend})[/green]")
+        upd = rep.task(f"embed+write ({backend})", len(plan.embed))
+        done = 0
+        for chunk in _chunks(plan.embed, args.chunk):
+            vecs = embed([r["tokens"] for r in chunk], backend,
+                         progress=lambda d, t: upd(done + d))
+            table.add([{**r, "vector": v} for r, v in zip(chunk, vecs)])
+            done += len(chunk)
+            upd(done)
+
+    console.print(f"[green]{args.project}: {plan.unchanged} kept, "
+                  f"{len(plan.rewrite)} refreshed, {len(plan.embed)} embedded, "
+                  f"{len(plan.delete_ids)} deleted (backend={backend})[/green]")
 
 
 def _lookup(table, name: str, project: str | None):
@@ -186,6 +238,10 @@ def main() -> None:
     pi.add_argument("--version", default="GALE01")
     pi.add_argument("--report", help="decomp.dev report JSON path or URL")
     pi.add_argument("--min-insns", type=int, default=8)
+    pi.add_argument("--full", action="store_true",
+                    help="re-embed everything, ignoring stored vectors")
+    pi.add_argument("--chunk", type=int, default=256,
+                    help="functions per embed+write batch")
     pi.set_defaults(func=cmd_ingest_dtk)
 
     pf = sub.add_parser("find")

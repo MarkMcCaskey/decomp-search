@@ -43,8 +43,14 @@ optionally a decomp.dev progress report for match percentages:
     --report 'https://decomp.dev/doldecomp/melee/GALE01.json?mode=report'
 ```
 
-Re-running replaces that project's rows, so multiple games can coexist in
-one index (`--project kirby ...` etc.).
+Ingest is **incremental**: each function's token text is diffed against the
+stored row, so re-running only re-embeds new/changed functions (metadata-only
+changes like a moved match % reuse the stored vector), and deletes stale
+rows. Embedding writes to LanceDB in chunks (`--chunk`, default 256), so an
+interrupted ingest keeps its progress — rerun and it resumes. `--full`
+forces a re-embed of everything. Multiple games coexist in one index
+(`--project kirby ...` etc.). Progress renders as rich bars on a TTY and as
+plain flushed lines when redirected to a log.
 
 ## Query
 
@@ -73,6 +79,7 @@ matching work. `eval` reports recall@k:
 - `dsearch/normalize.py` — objdump text → instruction token stream
 - `dsearch/embed.py` — hashed / voyage embedding backends
 - `dsearch/ingest_dtk.py` — dtk project adapter (objdump + decomp.dev report)
+- `dsearch/sync.py` — incremental sync planning (token diff → embed/reuse/delete)
 - `dsearch/db.py` — LanceDB schema/connection
 - `dsearch/cli.py` — `ingest-dtk` / `find` / `stats` / `eval`
 

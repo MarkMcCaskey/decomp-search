@@ -108,6 +108,12 @@ BACKENDS = {
     "voyage": embed_voyage,
 }
 
+BACKEND_DIMS = {"hashed": HASHED_DIM, "local": LOCAL_DIM, "voyage": LOCAL_DIM}
+
+
+def dim_for(backend: str) -> int:
+    return BACKEND_DIMS[backend]
+
 
 def embed(token_docs: list[str], backend: str = "hashed",
           progress: Progress = _noop) -> list[list[float]]:
