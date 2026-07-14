@@ -61,30 +61,64 @@ def embed_hashed(token_docs: list[str], progress: Progress = _noop,
 
 _local_model = None
 
+# padded-token budget per GPU batch; 16 x 2048 proven safe on 18GiB MPS
+# in fp32 (weights now load bf16, so this is conservative)
+MAX_BATCH_TOKENS = 32768
+MAX_BATCH_DOCS = 256
+
 
 def embed_local(token_docs: list[str], progress: Progress = _noop,
-                batch_size: int = 16) -> list[list[float]]:
+                batch_size: int = MAX_BATCH_DOCS) -> list[list[float]]:
     """voyage-4-nano, self-hosted via sentence-transformers (MPS/CUDA/CPU).
 
-    Sequence length is capped at 2048 tokens (huge functions are truncated)
-    to keep attention memory inside MPS limits.
+    Throughput: docs are packed longest-first into token-budget batches —
+    a batch takes as many docs as fit in MAX_BATCH_TOKENS padded tokens,
+    so short docs (the majority) share large batches instead of a fixed
+    small one sized for the 2048-token worst case. Sequences cap at 2048
+    tokens to bound attention memory.
     """
     global _local_model
+    import torch
     from sentence_transformers import SentenceTransformer  # lazy
 
     if _local_model is None:
+        kw = {}
+        if torch.backends.mps.is_available():
+            kw["model_kwargs"] = {"dtype": torch.bfloat16}
         _local_model = SentenceTransformer(
-            LOCAL_MODEL, trust_remote_code=True, truncate_dim=LOCAL_DIM)
+            LOCAL_MODEL, trust_remote_code=True, truncate_dim=LOCAL_DIM, **kw)
         _local_model.max_seq_length = 2048
-    # One encode call per input list: ST length-sorts internally, so each
-    # GPU batch pads to similar-length docs. Manual slicing padded every
-    # batch to its longest doc (up to 2048 tokens vs ~200 median).
+
     docs = [d[:8000] for d in token_docs]
-    emb = _local_model.encode_document(docs, batch_size=batch_size,
-                                       normalize_embeddings=True,
-                                       show_progress_bar=False)
-    progress(len(token_docs), len(token_docs))
-    return [e.tolist() for e in emb]
+    ids = _local_model.tokenizer(docs, truncation=True,
+                                 max_length=2048)["input_ids"]
+    lens = [len(x) for x in ids]
+    order = sorted(range(len(docs)), key=lambda i: -lens[i])
+
+    batches: list[list[int]] = []
+    cur: list[int] = []
+    cur_max = 0
+    for i in order:
+        if cur and (max(cur_max, lens[i]) * (len(cur) + 1) > MAX_BATCH_TOKENS
+                    or len(cur) >= batch_size):
+            batches.append(cur)
+            cur, cur_max = [], 0
+        cur.append(i)
+        cur_max = max(cur_max, lens[i])
+    if cur:
+        batches.append(cur)
+
+    out: list[list[float]] = [[] for _ in docs]
+    done = 0
+    for b in batches:
+        emb = _local_model.encode_document(
+            [docs[i] for i in b], batch_size=len(b),
+            normalize_embeddings=True, show_progress_bar=False)
+        for i, e in zip(b, emb):
+            out[i] = e.tolist()
+        done += len(b)
+        progress(done, len(docs))
+    return out
 
 
 def embed_voyage(token_docs: list[str], progress: Progress = _noop,

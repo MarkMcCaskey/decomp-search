@@ -117,6 +117,9 @@ def cmd_ingest_dtk(args) -> None:
         for chunk in _chunks(plan.rewrite, args.chunk):
             table.add(chunk)
 
+        # longest-first: chunks stay length-homogeneous for batch packing,
+        # and the memory-heaviest work runs first (fail fast, not at hour 1)
+        plan.embed.sort(key=lambda r: len(r["tokens"]), reverse=True)
         upd = rep.task(f"embed+write ({backend})", len(plan.embed))
         done = 0
         for chunk in _chunks(plan.embed, args.chunk):
@@ -240,8 +243,8 @@ def main() -> None:
     pi.add_argument("--min-insns", type=int, default=8)
     pi.add_argument("--full", action="store_true",
                     help="re-embed everything, ignoring stored vectors")
-    pi.add_argument("--chunk", type=int, default=256,
-                    help="functions per embed+write batch")
+    pi.add_argument("--chunk", type=int, default=1024,
+                    help="functions per embed+write chunk (DB write/resume unit)")
     pi.set_defaults(func=cmd_ingest_dtk)
 
     pf = sub.add_parser("find")
