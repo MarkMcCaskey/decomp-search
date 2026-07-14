@@ -63,17 +63,22 @@ _local_model = None
 
 
 def embed_local(token_docs: list[str], progress: Progress = _noop,
-                batch_size: int = 64) -> list[list[float]]:
-    """voyage-4-nano, self-hosted via sentence-transformers (MPS/CUDA/CPU)."""
+                batch_size: int = 16) -> list[list[float]]:
+    """voyage-4-nano, self-hosted via sentence-transformers (MPS/CUDA/CPU).
+
+    Sequence length is capped at 2048 tokens (huge functions are truncated)
+    to keep attention memory inside MPS limits.
+    """
     global _local_model
     from sentence_transformers import SentenceTransformer  # lazy
 
     if _local_model is None:
         _local_model = SentenceTransformer(
             LOCAL_MODEL, trust_remote_code=True, truncate_dim=LOCAL_DIM)
+        _local_model.max_seq_length = 2048
     vecs: list[list[float]] = []
     for i in range(0, len(token_docs), batch_size):
-        batch = [d[:16000] for d in token_docs[i : i + batch_size]]
+        batch = [d[:8000] for d in token_docs[i : i + batch_size]]
         emb = _local_model.encode_document(
             batch, batch_size=batch_size, normalize_embeddings=True)
         vecs.extend(e.tolist() for e in emb)

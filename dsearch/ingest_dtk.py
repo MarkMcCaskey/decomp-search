@@ -24,9 +24,18 @@ _RELOC = re.compile(r"^\s*[0-9a-f]+:\s+(R_PPC_\S+)\s+(\S+)")
 
 
 def find_objdump(project_root: Path) -> str:
+    import os
+    env = os.environ.get("DSEARCH_OBJDUMP")
+    if env:
+        return env
     cand = project_root / "build" / "binutils" / "powerpc-eabi-objdump"
     if cand.exists():
         return str(cand)
+    # any sibling dtk project's downloaded binutils works
+    for sib in project_root.parent.iterdir():
+        c = sib / "build" / "binutils" / "powerpc-eabi-objdump"
+        if c.exists():
+            return str(c)
     return "powerpc-eabi-objdump"  # hope it's on PATH
 
 
@@ -75,11 +84,21 @@ def parse_object(objdump: str, obj_path: Path, unit: str) -> Iterator[Function]:
 
 
 def iter_units(project_root: Path, version: str) -> Iterator[tuple[Path, str]]:
-    obj_root = project_root / "build" / version / "obj"
-    if not obj_root.is_dir():
-        raise FileNotFoundError(f"no object dir at {obj_root}")
-    for obj in sorted(obj_root.rglob("*.o")):
-        yield obj, str(obj.relative_to(obj_root))
+    """Target objects live under build/<ver>/obj/ (main binary) and
+    build/<ver>/<module>/obj/ (RELs). Compiled objects (build/<ver>/src/)
+    are excluded — we index the target side only."""
+    build_root = project_root / "build" / version
+    if not build_root.is_dir():
+        raise FileNotFoundError(f"no build dir at {build_root}")
+    found = False
+    for obj in sorted(build_root.rglob("*.o")):
+        rel = obj.relative_to(build_root)
+        if "obj" not in rel.parts:
+            continue
+        found = True
+        yield obj, str(rel)
+    if not found:
+        raise FileNotFoundError(f"no target objects under {build_root}")
 
 
 def find_source_file(project_root: Path, unit: str) -> str | None:

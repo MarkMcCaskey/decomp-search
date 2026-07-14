@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = ["lancedb", "rich"]
 
 [project.optional-dependencies]
+local = ["sentence-transformers", "transformers<5"]
 voyage = ["voyageai"]
 
 [project.scripts]
