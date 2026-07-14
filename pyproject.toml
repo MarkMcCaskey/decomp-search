@@ -1,0 +1,12 @@
+[project]
+name = "dsearch"
+version = "0.1.0"
+description = "Local similarity search over decompilation-project functions (asm + source), for finding matched twins and recipe donors"
+requires-python = ">=3.11"
+dependencies = ["lancedb", "rich"]
+
+[project.optional-dependencies]
+voyage = ["voyageai"]
+
+[project.scripts]
+dsearch = "dsearch.cli:main"
