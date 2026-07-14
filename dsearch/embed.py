@@ -175,4 +175,5 @@ def embed(token_docs: list[str], backend: str = "hashed",
 
 
 def default_backend() -> str:
-    return "hashed"
+    # local = self-hosted voyage-4-nano; DSEARCH_BACKEND overrides
+    return os.environ.get("DSEARCH_BACKEND", "local")

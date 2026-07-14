@@ -8,11 +8,14 @@ their source recipe."
 
 Storage/search is [LanceDB](https://lancedb.github.io/lancedb/) (local, no
 server). Embeddings are pluggable (each backend gets its own table, so they
-coexist for A/B comparison; select with the global `--backend` flag):
+coexist for A/B comparison; select with the global `--backend` flag or the
+`DSEARCH_BACKEND` env var — default `local`). `find` never runs a model at
+query time — it searches with the function's stored vector, so a backend
+only covers projects ingested with it.
 
-- `hashed` (default): deterministic feature-hashed n-grams over a normalized
+- `hashed`: deterministic feature-hashed n-grams over a normalized
   instruction-token stream. No API, no model download, fully reproducible.
-- `local`: [voyage-4-nano](https://huggingface.co/voyageai/voyage-4-nano)
+- `local` (default): [voyage-4-nano](https://huggingface.co/voyageai/voyage-4-nano)
   self-hosted via sentence-transformers (open weights, Apache 2.0; ~340M
   params, runs on MPS/CUDA/CPU; first run downloads the model). Shares an
   embedding space with the larger Voyage 4 API models, so a locally built
