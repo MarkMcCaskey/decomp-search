@@ -40,7 +40,9 @@
   },
   {
     "query": "fn_802523D8",
-    "expected": "fn_802514D8",
-    "note": "mninfo/mncount wrapper+inline text-free twins; donor source transplanted verbatim -> 100% match (session 2026-07-14)"
+    "note": "mninfo/mncount wrapper+inline text-free twins; donor source transplanted verbatim -> 100% match (session 2026-07-14)",
+    "expect": [
+      "fn_802514D8"
+    ]
   }
 ]
