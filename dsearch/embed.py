@@ -76,14 +76,15 @@ def embed_local(token_docs: list[str], progress: Progress = _noop,
         _local_model = SentenceTransformer(
             LOCAL_MODEL, trust_remote_code=True, truncate_dim=LOCAL_DIM)
         _local_model.max_seq_length = 2048
-    vecs: list[list[float]] = []
-    for i in range(0, len(token_docs), batch_size):
-        batch = [d[:8000] for d in token_docs[i : i + batch_size]]
-        emb = _local_model.encode_document(
-            batch, batch_size=batch_size, normalize_embeddings=True)
-        vecs.extend(e.tolist() for e in emb)
-        progress(min(i + batch_size, len(token_docs)), len(token_docs))
-    return vecs
+    # One encode call per input list: ST length-sorts internally, so each
+    # GPU batch pads to similar-length docs. Manual slicing padded every
+    # batch to its longest doc (up to 2048 tokens vs ~200 median).
+    docs = [d[:8000] for d in token_docs]
+    emb = _local_model.encode_document(docs, batch_size=batch_size,
+                                       normalize_embeddings=True,
+                                       show_progress_bar=False)
+    progress(len(token_docs), len(token_docs))
+    return [e.tolist() for e in emb]
 
 
 def embed_voyage(token_docs: list[str], progress: Progress = _noop,
