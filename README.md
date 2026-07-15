@@ -44,9 +44,9 @@ immediately without building any project or running the embedding model:
 mkdir -p data && curl -L https://github.com/MarkMcCaskey/decomp-search/releases/latest/download/decomp-search-index.tar.gz | tar xz -C data
 ```
 
-Contents: whole-function and 32-insn-window tables for the `hashed` backend
-(melee GALE01, pikmin2, mp4) and the `local` voyage-4-nano backend (melee),
-with decomp.dev match percentages as of the release date. Rows hold only
+Contents: whole-function and 32-insn-window tables for both the `hashed`
+and the `local` voyage-4-nano backends, covering melee (GALE01), pikmin2,
+and mp4, with decomp.dev match percentages as of the release date. Rows hold only
 normalized mnemonic-shape token streams (no operands, no addresses, no
 bytes), embedding vectors, and public symbol/match metadata. Re-running
 `ingest-dtk` on top of it is incremental — only new/changed functions get
