@@ -1,48 +1,72 @@
 [
-  {
-    "query": "lbHeap_80015900",
-    "project": "melee",
-    "expect": [
-      "MakeColorGenTExp"
-    ],
-    "note": "2x-partial-unroll construct twin, found manually 2026-07-07"
-  },
-  {
-    "query": "mpRightWallGetTop",
-    "project": "melee",
-    "expect": [
-      "mpLeftWallGetBottom",
-      "mpRightWallGetBottom",
-      "mpLeftWallGetTop",
-      "mpFloorGetRight",
-      "mpFloorGetLeft",
-      "mpCeilingGetRight",
-      "mpCeilingGetLeft"
-    ],
-    "note": "the 8-getter family, near-identical bodies"
-  },
-  {
-    "query": "un_8031FD18_OnEnter",
-    "project": "melee",
-    "expect": [
-      "un_80320A40_OnEnter"
-    ],
-    "note": "vi1201 sibling screens, same residual class"
-  },
-  {
-    "query": "mpLineNextNonFloor",
-    "project": "melee",
-    "expect": [
-      "mpLineNextNonRightWall",
-      "mpLinePrevNonFloor"
-    ],
-    "note": "mpLineNonFamily, matched 2026-07-13 by mirroring the in-file twin"
-  },
-  {
-    "query": "fn_802523D8",
-    "note": "mninfo/mncount wrapper+inline text-free twins; donor source transplanted verbatim -> 100% match (session 2026-07-14)",
-    "expect": [
-      "fn_802514D8"
-    ]
-  }
+ {
+  "query": "lbHeap_80015900",
+  "project": "melee",
+  "expect": [
+   "MakeColorGenTExp"
+  ],
+  "note": "2x-partial-unroll construct twin, found manually 2026-07-07"
+ },
+ {
+  "query": "mpRightWallGetTop",
+  "project": "melee",
+  "expect": [
+   "mpLeftWallGetBottom",
+   "mpRightWallGetBottom",
+   "mpLeftWallGetTop",
+   "mpFloorGetRight",
+   "mpFloorGetLeft",
+   "mpCeilingGetRight",
+   "mpCeilingGetLeft"
+  ],
+  "note": "the 8-getter family, near-identical bodies"
+ },
+ {
+  "query": "un_8031FD18_OnEnter",
+  "project": "melee",
+  "expect": [
+   "un_80320A40_OnEnter"
+  ],
+  "note": "vi1201 sibling screens, same residual class"
+ },
+ {
+  "query": "mpLineNextNonFloor",
+  "project": "melee",
+  "expect": [
+   "mpLineNextNonRightWall",
+   "mpLinePrevNonFloor"
+  ],
+  "note": "mpLineNonFamily, matched 2026-07-13 by mirroring the in-file twin"
+ },
+ {
+  "query": "fn_802523D8",
+  "note": "mninfo/mncount wrapper+inline text-free twins; donor source transplanted verbatim -> 100% match (session 2026-07-14)",
+  "expect": [
+   "fn_802514D8"
+  ]
+ },
+ {
+  "query": "ftKb_SpecialN_800F10D4",
+  "project": "melee",
+  "expect": [
+   "ftKb_SpecialN_800F11F0"
+  ],
+  "note": "Kirby hat-loader siblings, dist 0.0000; donor transplant (pragma dont_inline + fp2-check shape) -> 100% (session 2026-07-15)"
+ },
+ {
+  "query": "ftColl_80079AB0",
+  "project": "melee",
+  "expect": [
+   "ftColl_80079EA8"
+  ],
+  "note": "knockback formula; donor's giant nested expression form -> 99.82% calibrated-full (session 2026-07-15)"
+ },
+ {
+  "query": "it_802A3630",
+  "project": "melee",
+  "expect": [
+   "fn_802B895C"
+  ],
+  "note": "linkhookshot/samusgrapple cross-file twins, dist 0.0125; fp2-alias-into-inline + item_link arg + pad -> 99.96% (session 2026-07-15)"
+ }
 ]
